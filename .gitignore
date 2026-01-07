@@ -1,4 +1,6 @@
 .env.example
+/deploy
+/lambda.zip
 # compiled output
 /dist
 /node_modules

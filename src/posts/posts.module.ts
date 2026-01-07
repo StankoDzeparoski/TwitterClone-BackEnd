@@ -1,9 +1,12 @@
 import { Module } from '@nestjs/common';
-import { PostsController } from './posts.controller';
+import { DynamoModule } from '../dynamo/dynamo.module';
+import { PostsRepo } from './posts.repo';
 import { PostsService } from './posts.service';
+import { PostsController } from './posts.controller';
 
 @Module({
+  imports: [DynamoModule],
+  providers: [PostsRepo, PostsService],
   controllers: [PostsController],
-  providers: [PostsService]
 })
 export class PostsModule {}
