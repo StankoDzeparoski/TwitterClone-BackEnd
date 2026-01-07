@@ -8,6 +8,6 @@ import { UsersController } from './users.controller';
   imports: [DynamoModule],
   providers: [UsersRepo, UsersService],
   controllers: [UsersController],
-  exports: [UsersService],
+  exports: [UsersService, UsersRepo],
 })
 export class UsersModule {}
