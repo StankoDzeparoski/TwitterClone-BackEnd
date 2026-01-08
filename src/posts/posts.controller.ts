@@ -12,6 +12,7 @@ export class PostsController {
   @Post()
   @UseGuards(JwtAuthGuard)
   create(@Req() req: any, @Body() dto: CreatePostDto) {
+    //const imageInput = (dto as any).imageKeys?.length ? (dto as any).imageKeys : (dto as any).imageKey;
     const imageInput = dto.imageKeys?.length ? dto.imageKeys : dto.imageKey;
     return this.posts.create(req.user.id, dto.content ?? '', imageInput);
   }
@@ -37,5 +38,12 @@ export class PostsController {
   @UseGuards(JwtAuthGuard)
   retweet(@Req() req: any, @Param('postId') postId: string) {
     return this.posts.retweet(req.user.id, postId);
+  }
+
+  // ✅ merged likes: POST /posts/:postId/like
+  @Post(':postId/like')
+  @UseGuards(JwtAuthGuard)
+  like(@Req() req: any, @Param('postId') postId: string) {
+    return this.posts.toggleLike(req.user.id, postId);
   }
 }

@@ -4,6 +4,7 @@ import { newId } from '../common/ids';
 import { encodeCursor } from '../common/pipes/cursor.pipe';
 import { PostsRepo, PostItem } from './posts.repo';
 import { S3Service } from '../uploads/s3.service';
+import { UsersService } from '../users/users.service';
 
 export type PostView = {
   id: string;
@@ -21,7 +22,8 @@ export type PostView = {
 export class PostsService {
   constructor(
     private repo: PostsRepo,
-    private s3: S3Service, // ✅ inject
+    private s3: S3Service,
+    private users: UsersService,
   ) {}
 
   private async toView(p: PostItem): Promise<PostView> {
@@ -80,42 +82,6 @@ export class PostsService {
     return this.toView(item);
   }
 
-  async retweet(authorId: string, originalPostId: string) {
-    const original = await this.repo.getPostById(originalPostId);
-    if (!original) throw new NotFoundException('Post not found');
-
-    const existing = await this.repo.findUserRetweet(authorId, originalPostId);
-    if (existing) {
-      await this.repo.deletePostById(existing.id);
-      return { ok: true, reposted: false };
-    }
-
-    const createdAt = nowIso();
-    const id = newId('p_');
-
-    const item: PostItem = {
-      PK: `POST#${id}`,
-      SK: 'META',
-      entityType: 'POST',
-      id,
-      authorId,
-      content: original.content || '',
-      createdAt,
-      retweetOfId: originalPostId,
-      likeCount: 0,
-
-      // ✅ carry images into retweet in feed
-      imageKeys: original.imageKeys ?? [],
-
-      GSI1PK: 'FEED#GLOBAL',
-      GSI1SK: `POST#${createdAt}#${id}`,
-      GSI2PK: `USER#${authorId}`,
-      GSI2SK: `RT#${originalPostId}#${createdAt}#${id}`,
-    };
-
-    await this.repo.putPost(item);
-    return { ok: true, reposted: true, item: await this.toView(item) };
-  }
 
   async feed(limit: number, startKey?: Record<string, any>) {
     const { items, lastKey } = await this.repo.queryFeed(limit, startKey);
@@ -133,4 +99,67 @@ export class PostsService {
 
     return { items: views, nextCursor: encodeCursor(lastKey) };
   }
+
+  async retweet(authorId: string, originalPostId: string) {
+    const original = await this.repo.getPostById(originalPostId);
+    if (!original) throw new NotFoundException('Post not found');
+
+    const existing = await this.repo.findUserRetweet(authorId, originalPostId);
+    if (existing) {
+      await this.repo.deletePostById(existing.id);
+
+      // ✅ update user record (remove original postId from reposted list)
+      await this.users.removeRepostedPost(authorId, originalPostId);
+
+      return { ok: true, reposted: false };
+    }
+
+    const createdAt = nowIso();
+    const id = newId('p_');
+
+    const item: PostItem = {
+      PK: `POST#${id}`,
+      SK: 'META',
+      entityType: 'POST',
+      id,
+      authorId,
+      content: original.content || '',
+      createdAt,
+      retweetOfId: originalPostId,
+      likeCount: 0,
+      imageKeys: original.imageKeys ?? [],
+
+      GSI1PK: 'FEED#GLOBAL',
+      GSI1SK: `POST#${createdAt}#${id}`,
+      GSI2PK: `USER#${authorId}`,
+      GSI2SK: `RT#${originalPostId}#${createdAt}#${id}`,
+    };
+
+    await this.repo.putPost(item);
+
+    // ✅ update user record (add original postId)
+    await this.users.addRepostedPost(authorId, originalPostId);
+
+    return { ok: true, reposted: true, item: await this.toView(item) };
+  }
+
+  // == likes part
+
+  async toggleLike(userId: string, postId: string) {
+    // Optional: validate post exists
+    const p = await this.repo.getPostById(postId);
+    if (!p) throw new NotFoundException('Post not found');
+
+    const res = await this.repo.toggleLike(userId, postId);
+
+    // ✅ update user model list
+    if (res.liked) {
+      await this.users.addLikedPost(userId, postId);
+    } else {
+      await this.users.removeLikedPost(userId, postId);
+    }
+
+    return res; // { liked: boolean }
+  }
+
 }

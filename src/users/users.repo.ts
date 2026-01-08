@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, PutCommand, UpdateCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { DynamoService } from '../dynamo/dynamo.service';
 
 export type UserItem = {
@@ -11,6 +11,11 @@ export type UserItem = {
   email: string;
   passwordHash: string;
   createdAt: string;
+
+  likedPostIds: string[];
+  repostedPostIds: string[];
+  usersFollowingIds?: Set<string> | string[];
+  userFollowersIds?: Set<string> | string[];
 };
 
 @Injectable()
@@ -65,4 +70,127 @@ export class UsersRepo {
       }),
     );
   }
+
+  // ---------- helpers ----------
+  private async getListIndex(userId: string, attr: 'likedPostIds' | 'repostedPostIds', postId: string) {
+    const u = await this.getById(userId);
+    const list = (u?.[attr] ?? []) as string[];
+    return list.indexOf(postId); // -1 if not found
+  }
+
+  async addToUserListOnce(
+    userId: string,
+    attr: 'likedPostIds' | 'repostedPostIds',
+    postId: string,
+  ) {
+    // Add only if not already present (atomic with condition)
+    await this.db.doc.send(
+      new UpdateCommand({
+        TableName: this.db.tableName,
+        Key: this.userKey(userId),
+        UpdateExpression: `SET ${attr} = list_append(if_not_exists(${attr}, :empty), :one)`,
+        ConditionExpression: `attribute_not_exists(${attr}) OR NOT contains(${attr}, :pid)`,
+        ExpressionAttributeValues: {
+          ':empty': [],
+          ':one': [postId],
+          ':pid': postId,
+        },
+      }),
+    );
+  }
+
+  async removeFromUserListIfPresent(
+    userId: string,
+    attr: 'likedPostIds' | 'repostedPostIds',
+    postId: string,
+  ) {
+    const idx = await this.getListIndex(userId, attr, postId);
+    if (idx === -1) return;
+
+    await this.db.doc.send(
+      new UpdateCommand({
+        TableName: this.db.tableName,
+        Key: this.userKey(userId),
+        UpdateExpression: `REMOVE ${attr}[${idx}]`,
+      }),
+    );
+  }
+
+  // follow logic
+
+  private normalizeStringSet(value: any): string[] {
+    if (!value) return [];
+    if (value instanceof Set) return Array.from(value);
+    if (Array.isArray(value)) return value;
+    return [];
+  }
+
+  async isFollowing(followerId: string, followeeId: string): Promise<boolean> {
+    const me = await this.getById(followerId);
+    if (!me) return false;
+    const following = this.normalizeStringSet(me.usersFollowingIds);
+    return following.includes(followeeId);
+  }
+
+  async follow(followerId: string, followeeId: string) {
+    // Atomic: add to follower's following set + add to followee's followers set
+    await this.db.doc.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Update: {
+              TableName: this.db.tableName,
+              Key: this.userKey(followerId),
+              UpdateExpression: 'ADD usersFollowingIds :s',
+              ExpressionAttributeValues: {
+                ':s': new Set([followeeId]),
+              },
+            },
+          },
+          {
+            Update: {
+              TableName: this.db.tableName,
+              Key: this.userKey(followeeId),
+              UpdateExpression: 'ADD userFollowersIds :s',
+              ExpressionAttributeValues: {
+                ':s': new Set([followerId]),
+              },
+            },
+          },
+        ],
+      }),
+    );
+  }
+
+  async unfollow(followerId: string, followeeId: string) {
+    // Atomic: remove from both sets
+    await this.db.doc.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Update: {
+              TableName: this.db.tableName,
+              Key: this.userKey(followerId),
+              UpdateExpression: 'DELETE usersFollowingIds :s',
+              ExpressionAttributeValues: {
+                ':s': new Set([followeeId]),
+              },
+            },
+          },
+          {
+            Update: {
+              TableName: this.db.tableName,
+              Key: this.userKey(followeeId),
+              UpdateExpression: 'DELETE userFollowersIds :s',
+              ExpressionAttributeValues: {
+                ':s': new Set([followerId]),
+              },
+            },
+          },
+        ],
+      }),
+    );
+  }
+
+
 }
