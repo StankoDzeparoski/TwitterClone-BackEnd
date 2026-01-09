@@ -27,14 +27,14 @@ export class AuthController {
   async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
     const { token } = await this.auth.register(dto.username, dto.email, dto.password);
     this.setCookie(res, token);
-    return { ok: true };
+    return { ok: true, token };
   }
 
   @Post('login')
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     const { token } = await this.auth.login(dto.email, dto.password);
     this.setCookie(res, token);
-    return { ok: true };
+    return { ok: true, token };
   }
 
   @Post('logout')

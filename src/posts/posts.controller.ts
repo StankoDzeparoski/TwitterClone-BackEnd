@@ -46,4 +46,9 @@ export class PostsController {
   like(@Req() req: any, @Param('postId') postId: string) {
     return this.posts.toggleLike(req.user.id, postId);
   }
+
+  @Get(':postId')
+  async getById(@Param('postId') postId: string) {
+  return { post: await this.posts.getById(postId) };
+}
 }

@@ -82,6 +82,12 @@ export class PostsService {
     return this.toView(item);
   }
 
+  async getById(postId: string): Promise<PostView> {
+    const p = await this.repo.getPostById(postId);
+    if (!p) throw new NotFoundException('Post not found');
+    return this.toView(p);
+  }
+
 
   async feed(limit: number, startKey?: Record<string, any>) {
     const { items, lastKey } = await this.repo.queryFeed(limit, startKey);
